@@ -67,6 +67,9 @@ jobs:
           # Embedded only; QEMU dlopens it at GL start-up. Without it Husk dies at
           # qemu_egl_init_dpy_cocoa with "Couldn't open @rpath/libANGLE-shared.dylib".
           cp "$APP/Frameworks/libANGLE-shared.dylib" build/ios-arm64/sysroot/lib/
+          # The PS4 layer. Embedded only, opened by path when a PS4 game starts -- but
+          # scripts/package_ipa.sh checks for it and refuses to package the bundle without it.
+          cp "$APP/Frameworks/libhuskps4.dylib" build/ios-arm64/lib/
 
           echo "--- staged ---"
           ls -l build/ios-arm64/lib build/ios-arm64/sysroot/lib
