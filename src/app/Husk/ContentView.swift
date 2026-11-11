@@ -39,6 +39,12 @@ struct ContentView: View {
     @State private var showWhatsNew = false
     @AppStorage(Holiday.key) private var holiday = true
 
+    /// Whether a sheet is already up on this view. SwiftUI shows one sheet per view at a time, and a request made
+    /// while another is showing is dropped without a word -- so whoever comes last has to wait, not compete.
+    private var aSheetIsShowing: Bool {
+        router.showFiles || router.showDownloads || router.showProfile || router.showImport || jit.showSetup
+    }
+
     var body: some View {
         ZStack {
             // The tabs, and the guest on top of them.
@@ -184,7 +190,11 @@ struct ContentView: View {
             Text("Metadata for \(n) of your app\(n == 1 ? "" : "s") has been updated. Would you like to download the updates?")
         }
         // An APK shared to Husk: where does it go?
-        .sheet(isPresented: Binding(get: { !incoming.waiting.isEmpty },
+        //
+        // Import is open exactly when an APK arrives -- Select File, then the picker -- so this is the sheet that
+        // used to lose the race and never appear, leaving the APK copied to Incoming/ with nothing to say where it
+        // should go. It waits for the sheet already showing to finish instead.
+        .sheet(isPresented: Binding(get: { !incoming.waiting.isEmpty && !aSheetIsShowing },
                                     set: { if !$0 { incoming.discard() } })) {
             IncomingChooser()
                 .huskDetents([.medium], dragIndicator: true)
