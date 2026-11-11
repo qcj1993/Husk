@@ -143,20 +143,11 @@ targets:
         embed: true
         codeSign: true
         link: false
-      # MoltenVK, which Unreal Engine's Vulkan renderer runs on (Minecraft Dungeons). Built from
-      # KhronosGroup/MoltenVK v1.4.2 with `make ios` (third_party/build/MoltenVK-1.4.2) and copied to
-      # build/ios-arm64/lib. Embedded, not linked: the native runtime opens it by path when an Unreal game starts.
-      - framework: ../../build/ios-arm64/lib/MoltenVK.xcframework
-        embed: true
-        codeSign: true
-        link: false
-      # The PS4 layer: Bachata-S4's core (branch husk) on husk-fex's FEXCore, as one dylib exporting husk_console_module_v1.
-      # Built by scripts/build_ps4_ios.sh. Embedded, not linked: it needs iOS 17.4 and is opened by path only there
-      # (PS4Store.moduleURL), by the console host (src/translation-layer-next/husk-console-host.c).
-      - framework: ../../build/ios-arm64/lib/libhuskps4.dylib
-        embed: true
-        codeSign: true
-        link: false
+      # MoltenVK and libhuskps4 are dropped in this build: MoltenVK only serves Unreal Engine's Vulkan
+      # renderer, and libhuskps4 is the PS4 layer. Both are embedded with link: false, so nothing in the
+      # Swift or C code references their symbols -- they are opened by path at run time, and a build
+      # without them simply never opens them. Dropping them removes two prebuilt artefacts the CI build
+      # would otherwise have to extract from the upstream IPA.
     preBuildScripts:
       - name: Stage guest image
         # The Phase 0 guest is far too large for git, so it is fetched rather than
