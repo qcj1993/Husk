@@ -60,7 +60,13 @@ struct ImportView: View {
             Text(UIDevice.current.userInterfaceIdiom == .pad ? "Drop an APK file here" : "Pick an APK from Files")
                 .font(.system(size: 15)).foregroundStyle(Console.textDim)
             if UIDevice.current.userInterfaceIdiom == .pad { Text("or").font(.system(size: 13)).foregroundStyle(Console.textDim) }
-            Button { dismiss(); router.addSomething() } label: {
+            Button {
+                dismiss()
+                // Import's sheet is still on screen while it animates away, and a sheet cannot be handed to a
+                // controller that is being dismissed: the picker went down with it and the Library was all that
+                // was left. Present once the dismissal has finished instead.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { router.addSomething() }
+            } label: {
                 Text("Select File").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
                     .padding(.horizontal, 28).frame(height: 44)
                     .background(Console.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
