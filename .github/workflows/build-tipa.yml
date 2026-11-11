@@ -1,0 +1,127 @@
+name: Build Husk tipa
+
+# Builds a TrollStore .tipa from this fork without compiling QEMU.
+#
+# The heavy half of Husk's build (QEMU, glib, libffi, pixman, ANGLE converged over
+# Metal) is reused as prebuilt binaries lifted out of the official release IPA, so
+# only the Swift/C half is compiled here. That is sound because the parts that would
+# otherwise be compiled -- src/translation-layer and src/translation-layer-next --
+# include nothing but the standard C library and Darwin headers (verified: their
+# only <...> includes are stdint/stdio/stdlib/string/errno/mach/dlfcn/pthread), and
+# HuskBridge.h declares QEMU's entry points by hand instead of including QEMU's
+# headers. Nothing in the Swift or C code links glib, libffi or pixman directly.
+#
+# What is still needed from upstream: libqemu-aarch64-softmmu.dylib (linked) and
+# libANGLE-shared.dylib (embedded, opened by QEMU by @rpath at GL start-up). Both
+# are inside the release .tipa.
+#
+# libhusk_rppairing.a is genuinely built here, because it is a static library and
+# therefore already linked into the released binary -- it cannot be lifted out.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out this fork
+        uses: actions/checkout@v4
+
+      - name: Report what is being built
+        run: |
+          echo "source commit: $(git rev-parse --short HEAD)"
+          git log -1 --format='  %h %ad %s' --date=short
+          LATEST=$(curl -sf https://api.github.com/repos/Leviidev/Husk/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          echo "upstream latest release: $LATEST"
+          echo "binaries will be taken from: $LATEST"
+
+      - name: Toolchain
+        run: |
+          brew install xcodegen qemu
+          xcodegen --version
+          qemu-img --version | head -1
+
+      - name: Lift prebuilt binaries out of the upstream tipa
+        run: |
+          set -euo pipefail
+          TAG=$(curl -sf https://api.github.com/repos/Leviidev/Husk/releases/latest \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          URL="https://github.com/Leviidev/Husk/releases/download/${TAG}/Husk.tipa"
+          echo "downloading $URL"
+          curl -fL --retry 3 --retry-delay 5 -o /tmp/Husk.tipa "$URL"
+          ls -l /tmp/Husk.tipa
+          rm -rf /tmp/tipa && mkdir -p /tmp/tipa
+          unzip -q /tmp/Husk.tipa -d /tmp/tipa
+          APP=/tmp/tipa/Payload/Husk.app
+          ls "$APP/Frameworks" | head -40
+
+          mkdir -p build/ios-arm64/lib build/ios-arm64/sysroot/lib
+
+          # Linked by the app target (project.yml: -l / framework entries).
+          cp "$APP/Frameworks/libqemu-aarch64-softmmu.dylib" build/ios-arm64/lib/
+          # Embedded only; QEMU dlopens it at GL start-up. Without it Husk dies at
+          # qemu_egl_init_dpy_cocoa with "Couldn't open @rpath/libANGLE-shared.dylib".
+          cp "$APP/Frameworks/libANGLE-shared.dylib" build/ios-arm64/sysroot/lib/
+
+          echo "--- staged ---"
+          ls -l build/ios-arm64/lib build/ios-arm64/sysroot/lib
+
+      - name: QEMU sources for pc-bios firmware
+        run: |
+          set -euo pipefail
+          # Not compiled here. QEMU's pc-bios directory is required at package time
+          # by project.yml's preBuildScript, which copies edk2/efi/pxe ROMs into the
+          # bundle and fails the build outright when they are missing.
+          mkdir -p third_party/sources third_party/build
+          curl -fL --retry 3 --retry-delay 5 \
+            -o third_party/sources/qemu-10.0.12-utm.tar.xz \
+            https://github.com/utmapp/qemu/releases/download/v10.0.12-utm/qemu-10.0.12-utm.tar.xz
+          tar -xf third_party/sources/qemu-10.0.12-utm.tar.xz -C third_party/build
+          ls -d third_party/build/qemu-10.0.12-utm
+          ls third_party/build/qemu-10.0.12-utm/pc-bios | head -20
+
+      - name: Phase 0 guest kernel
+        run: ./scripts/fetch_phase0_guest.sh
+
+      - name: Build libhusk_rppairing.a
+        run: |
+          rustup target add aarch64-apple-ios
+          ./scripts/build_rppairing_ios.sh
+          ls -l build/ios-arm64/lib/libhusk_rppairing.a
+
+      - name: Build and package the tipa
+        run: |
+          # package_ipa.sh regenerates the Xcode project from project.yml with
+          # xcodegen, builds with CODE_SIGNING_ALLOWED=NO, refuses to ship a stale
+          # app when the build failed, and strips dynamic-codesigning for TrollStore.
+          ./scripts/package_ipa.sh --trollstore build/Husk.tipa
+
+      - name: Show what was built
+        if: always()
+        run: |
+          ls -l build/ 2>/dev/null || true
+          find build -maxdepth 2 -name '*.tipa' -o -maxdepth 2 -name '*.ipa' 2>/dev/null || true
+
+      - name: Keep the build log when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            /tmp/husk_ipa/build.log
+            build/logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the tipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Husk-tipa
+          path: build/Husk.tipa
+          if-no-files-found: error
+          retention-days: 30
