@@ -223,12 +223,38 @@ final class IncomingFiles: ObservableObject {
     }
 
     /// Installed into Android -- now if it is up, otherwise as soon as it is.
+    ///
+    /// Android is normally not up when this is tapped, and the install waits for it -- which
+    /// used to be the end of the story: the sheet closed, and nothing else happened. A file
+    /// waiting in line and a file that was dropped looked exactly the same, and both looked
+    /// like a button that does nothing. So say which it is, and hand over the start.
     func sendToAndroid() {
         let urls = waiting
         waiting = []
         guard !urls.isEmpty else { return }
         forAndroid += urls
         installForAndroidIfReady()
+        guard !forAndroid.isEmpty else { return }
+        let host = AndroidHost.shared
+        let kept = forAndroid.count == 1 ? "It is" : "They are"
+        if host.busy != nil {
+            host.say("Queued for Android",
+                     "\(kept) kept. Android is busy; the install starts when that finishes.")
+            return
+        }
+        switch GuestImage.shared.state {
+        case .ready:
+            host.say("Waiting for Android",
+                     "\(kept) kept, and installs by itself as soon as Android is up.")
+            Router.shared.startAndroid()
+        case .downloading, .installing:
+            host.say("Android is still being prepared",
+                     "\(kept) kept. The install starts once Android is up.")
+        case .missing, .failed:
+            host.say("Android isn't set up yet",
+                     "\(kept) kept. Download Android first, then it installs by itself.",
+                     good: false)
+        }
     }
 
     func installForAndroidIfReady() {
